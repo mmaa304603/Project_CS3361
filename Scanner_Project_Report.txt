@@ -1,0 +1,252 @@
+1. Introduction
+
+This project implements a lexical scanner using the deterministic finite automaton(DFA) supplied in the textbook. The scanner conducts a source file using left to right evaluation and recognizes assignments, arithmetic operators, parentheses, identifiers, numbers, and the reserved words "read" and "write". Whitespace and both comment forms are ignored. The main design requirement is the longest possible valid token. To meet the output specification, the program collects token types and prints them only after the complete input has been validated; if any invalid input is encountered, its only output is error.
+
+2. Important Data Structures
+The code implements the automaton with state-based decisions (rather than storing a separate two-dimensional transition table).
+
+inputStream
+  Specification: A character sequence with a current cursor and operations readNext and restoreOne.
+  Purpose: Supplies input and preserves a lookahead character that belongs to the next token.
+
+state
+  Specification: An integer representing the active DFA state: 1–16. States 6–10 and 12 represent directly recognized tokens.
+  Purpose: Tracks which transitions are legal at each character.
+
+lookahead
+  Specification: One character from inputStream, or a distinguished end-of-file marker.
+  Purpose: Allows the scanner to decide whether to continue the current token or finish it.
+
+keywordPrefix / keywordLength
+  Specification: keywordPrefix stores at most the first five characters of an identifier; keywordLength is its length capped at 6.
+  Purpose: Distinguishes exactly read and write from longer identifiers without storing entire lexemes.
+
+tokenSequence
+  Specification: A finite, ordered, growable sequence of token types, initially empty.
+  Purpose: Keeps all accepted tokens until validity of the entire file is known.
+
+tokenKind
+  Specification: tokenKind is one of assign, plus, minus, times, div, lparen, rparen, id, number, read, write, END, ERROR
+  Purpose: Communicates each recognition result 
+
+errorFlag
+  Specification: errorFlag is Boolean.
+  Purpose: Indicate whether the final output is an error.
+
+State interpretation: 
+1: start state
+2: distinguishes division from comments
+3: skips // comments
+4–5: skip /* ... */ comments
+11–12: recognize :=
+13–15: recognize numbers
+16: recognizes identifiers or keywords. 
+
+Single character operators and parentheses use accepting states 6–10. 
+For this implementation, states 6-10 and 12 are conceptual accepting
+states from the textbook DFA only. The C code returns the corresponding
+tokens directly from state 1 or state 11 and never assigns those state
+numbers. Therefore the transition table below lists only runtime states.
+
+A successful number can end after digits, after a trailing decimal point, or after decimal digit: as required by the given grammar.
+
+Key features: 
+(i) every completed token is the longest valid prefix starting at its initial position
+(ii) any character read beyond the end of an accepted token is restored for the next scan
+(iii) comments never enter tokenSequence; and (iv) no successful token list is printed before the whole file is checked.
+
+
+3. Pseudocode
+
+The pseudocode follows the DFA and deliberately uses abstract operations such as readNext, restoreOne, and append. Each procedure identifies its input, output, and the meaning of that output.
+
+3.1 restoreLookahead(inputStream, character)
+Input: inputStream and a previously read lookahead character (or EOF).
+Output: Boolean success.
+
+Relationship: The next read sees character again when character is not EOF; EOF needs no restoration.
+IF character = EOF THEN RETURN true
+RETURN whether restoreOne(inputStream, character) succeeds
+
+3.2 scan(inputStream)
+Input: A readable input stream with its cursor not already at EOF.
+Output: One token type; ERROR on an invalid/incomplete token; END if only skipped material remains.
+
+Relationship: Returns the longest valid token starting at the next non-skipped character and leaves the stream ready for the following scan. Comments and whitespace are removed.
+
+state ← 1;
+keywordPrefix ← empty;
+keywordLength ← 0;
+
+REPEAT
+  c ← readNext(inputStream)
+  CASE OF state
+    1:
+      IF c = EOF THEN RETURN END
+      IF c is whitespace THEN CONTINUE
+      IF c = "/" THEN state ← 2
+      ELSE IF c = "(" THEN RETURN lparen
+      ELSE IF c = ")" THEN RETURN rparen
+      ELSE IF c = "+" THEN RETURN plus
+      ELSE IF c = "-" THEN RETURN minus
+      ELSE IF c = "*" THEN RETURN times
+      ELSE IF c = ":" THEN state ← 11
+      ELSE IF c = "." THEN state ← 13
+      ELSE IF c is digit THEN state ← 14
+      ELSE IF c is letter THEN state ← 16;
+        keywordPrefix ← c; keywordLength ← 1
+      ELSE RETURN ERROR
+    2:
+      IF c = "/" THEN state ← 3
+      ELSE IF c = "*" THEN state ← 4
+      ELSE IF NOT restoreLookahead(inputStream, c) THEN RETURN ERROR
+        RETURN div
+    3:
+      IF c = newline THEN state ← 1
+      ELSE IF c = EOF THEN RETURN ERROR
+    4:
+      IF c = EOF THEN RETURN ERROR
+      ELSE IF c = "*" THEN state ← 5
+    5:
+      IF c = EOF THEN RETURN ERROR
+      ELSE IF c = "/" THEN state ← 1
+      ELSE IF c ≠ "*" THEN state ← 4
+    11:
+      IF c = "=" THEN RETURN assign 
+      ELSE RETURN ERROR
+    13:
+      IF c is digit THEN state ← 15 
+      ELSE RETURN ERROR
+    14: 
+      IF c is digit THEN remain in state 14
+      ELSE IF c = "." THEN state ← 15
+      ELSE IF NOT restoreLookahead(inputStream, c) THEN RETURN ERROR
+        RETURN number
+    15: 
+      IF c is digit THEN remain in state 15
+      ELSE IF NOT restoreLookahead(inputStream, c) THEN RETURN ERROR
+        RETURN number
+    16:
+      IF c is letter or digit THEN save c if fewer than five prefix characters are saved;
+        keywordLength ← min(6, keywordLength + 1)
+      ELSE
+        IF NOT restoreLookahead(inputStream, c) THEN RETURN ERROR
+        IF keywordLength = 4 AND prefix = "read" THEN RETURN read
+        IF keywordLength = 5 AND prefix = "write" THEN RETURN write
+      RETURN id
+  END CASE
+UNTIL END or ERROR
+
+A practical error check is applied whenever a lookahead character must be restored. The pseudocode abbreviates this repeated check in states 2, 14, and 15; if restoration fails, scan returns ERROR.
+
+
+3.3 appendToken(tokenSequence, tokenKind)
+-----------------------------------------
+Input: A growable sequence of tokens and a newly recognized token type.
+Output: Updated sequence and Boolean success.
+Relationship: On success the new token is added at the end in source order; on storage failure success is false.
+IF sequence has no available position THEN request more capacity
+IF capacity expansion fails THEN RETURN false
+Add tokenKind to the end of tokenSequence
+RETURN true
+
+3.4 tokenName(tokenKind)
+------------------------
+Input: One successfully recognized token type.
+Output: Its printable token-name string.
+Relationship: Maps each internal token type to its required name (e.g., TIMES → "times").
+RETURN the name corresponding to tokenKind
+
+3.5 main(commandLineArguments)
+------------------------------
+Input: The command-line argument containing one input filename.
+Output: Exactly "error" or one parenthesized, comma-separated token list.
+Relationship: Prints the list precisely when every input character belongs to valid tokens, whitespace, or properly closed comments; otherwise prints only error.
+IF the number of input filenames is not one THEN PRINT "error"; STOP
+Open the named file; IF opening fails THEN PRINT "error"; STOP
+tokenSequence ← empty; errorFlag ← false
+WHILE input has an unread character DO
+    tokenKind ← scan(inputStream)
+    IF tokenKind = END THEN EXIT WHILE
+    IF tokenKind = ERROR THEN errorFlag ← true; EXIT WHILE
+    IF NOT appendToken(tokenSequence, tokenKind) THEN
+        errorFlag ← true; EXIT WHILE
+END WHILE
+IF input reading or closing failed THEN errorFlag ← true
+IF errorFlag THEN PRINT "error"; STOP
+PRINT "(" + token names joined by ", " + ")"
+Longest-match explanation: states 14, 15, and 16 keep consuming legal continuation characters. When the next character cannot extend that token, the scanner restores the lookahead and returns the currently accepted token. State 2 first checks whether / begins a longer comment before accepting div. State 11 waits for = before accepting :=. In state 16, the entire identifier is scanned before checking read or write, so read1 is id rather than read followed by number.
+
+Special end-of-file behavior: a trailing // comment without a final newline is invalid under the exact assignment production, which explicitly ends the comment with newline. An unclosed /* ... */ comment is also invalid.
+
+
+4. Test Cases and Rationale
+
+The following checks were run against the C source compiled with GCC using standard C11 warnings enabled. Tests cover every token family, longest matching, comments, error-only output, and end-of-file handling.
+
+1. Assignment example
+  Input: read\n/* foo\nbar */\n*\nfive 5\n
+  Expected output: (read, times, id, number)
+  Reason: Reference example; verifies skipping a multiline comment.
+
+2. Symbols
+  Input: :=+-*/()
+  Expected output: (assign, plus, minus, times, div, lparen, rparen)
+  Reason: Covers all punctuation tokens and adjacency without spaces.
+
+3. Words
+  Input: read write read1 writer Read\n
+  Expected output: (read, write, id, id, id)
+  Reason: Checks exact reserved words, prefixes, and case sensitivity.
+
+4. Number forms
+  Input: 0 42 .5 5. 45.67\n
+  Expected output: (number, number, number, number, number)
+  Reason: Covers integers and all allowed decimal forms.
+
+5. Longest match
+  Input: read123 12.34 :=
+  Expected output: (id, number, assign)
+  Reason: Ensures a word/number/operator is not split prematurely.
+
+6. Both comments
+  Input: a// xyz\nb /*xx***/ c
+  Expected output: (id, id, id)
+  Reason: Ensures line and block comments produce no token.
+
+7. Invalid character
+  Input: read x @ 123\n
+  Expected output: error
+  Reason: Shows all-or-nothing output even after valid prefixes.
+
+8. Incomplete assignment
+  Input: a : 2
+  Expected output: error
+  Reason: A colon alone is not a token.
+
+9. Invalid point
+  Input: .
+  Expected output: error
+  Reason: A leading decimal point requires a digit.
+
+10. Open block comment
+  Input: foo /* broken
+  Expected output: error
+  Reason: Rejects a block comment without closing */.
+
+11. Line comment at EOF
+  Input: read // comment
+  Expected output: error
+  Reason: Checks the specified newline terminator for // comments.
+
+12. Empty input
+  Input: [empty file]
+  Expected output: ()
+  Reason: Validates the empty token sequence.
+
+* In the Input text column, \n indicates a newline character; [empty file] contains zero characters.
+
+5. Acknowledgments
+==================
+
+The course textbook and assignment provided the DFA and token grammar. OpenAI ChatGPT assisted with drafting and reviewing the C scanner, tests, and report. [List any additional contributors and their specific roles here, or remove this placeholder.]

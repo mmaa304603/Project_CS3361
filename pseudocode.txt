@@ -1,0 +1,41 @@
+<example>
+Data
+   finalStateToToken: an array. finalStateToToken[i], where i is a state, is the token type corresponding to state i. 
+   finalStateToToken: an array. finalStateToToken[i] is the token name corresponding to the state i.  
+
+scan
+   input: 
+      s: string
+   output: 
+      token: the first token in s  
+
+   data: 
+       cstate: current state (a number)
+       PointerCurChar: …. [explanation must be given for a piece of data as done above] 
+       curChar: …  
+       nextState: …
+   plan 
+       cState := 1
+       PointerCurChar := 0
+       while PointerCurChar is not at the end of s 
+                nextState := getNextState(cState, i[PointerCurChar]); 
+                if (nextState == -1) 
+                   if(cState is final) 
+                                // token is the whatever token represented by cStat
+                                token := finalStateToToken[cState]
+                   else 
+                                report error
+                                end program    
+                else
+                     cState := nextState
+                     PointerCurChar ++,
+
+
+
+getNextState
+   input 
+cState: … 
+cChar: … 
+   output 
+s: the next state following cState and cChar (next state is -1 if there is no next state)
+

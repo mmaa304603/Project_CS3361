@@ -1,0 +1,63 @@
+1. Introduction. Whatever special thing you want to show can go here. It should not be long.
+2. Production rules
+
+The scanner recognizes the following lexical production rules:
+
+```
+assign  -> :=
+plus    -> +
+minus   -> -
+times   -> *
+div     -> /
+lparen  -> (
+rparen  -> )
+id      -> letter (letter | digit)*, except read and write
+number  -> digit digit* | digit* ('.' digit | digit '.') digit*
+comment -> '/*' (non-* | '*' non-/)* '*/'
+           | '//' (non-newline)* newline
+read    -> read
+write   -> write
+```
+
+Comments and whitespace are skipped and do not produce tokens. The scanner
+uses the longest possible valid token rule; therefore `read1` is an `id`, not
+the token `read` followed by another token.
+
+3. Specify the important data structure(s) you will use in your scanner algorithm. The speci
+fication should be independent of any specific programming language such as JAVA. Here
+is an example of specifying a data structure.
+To specify a data structure for the table in Fig 2.12 in the textbook, we need the following
+data structure with a name transitionTable:
+(a) transitionTable is a two dimensional array. The first dimension is indexed from
+1 to 18 (the number of states) and the second dimension is indexed from 1 to 14 with
+1 representing white spaces (space, tab, newline), 2 representing the character /, ···,
+14 representing any letter.
+(b) For any integer i and j, transitionTable[i][j] is a record with field names
+i. action and newState.
+ii. action can take values of move, recognize,stuck.
+transitionTable[i][j].action=move means that the automata should move to
+next state and transitionTable[i][j].newState is the state to move to.
+4
+transitionTable[i][j].move = recognize means that i is a final state and the
+automata can not move to any other state with the input character corresponding to
+the number j, i.e., we recognize a token!
+transitionTable[i][j].move = stuck means that the the automata can not get
+to any state from state i with a character corresponding to the number j.
+4. The pseudo-code. For each function in your pseudo-code, you MUST have input, output
+and how output is related to input. As for pseudo-code statements you can use to describe
+your algorithm, please refer to the sample pseudo-code given in Section 1. The principle
+is not to use statements in a specific language such as JAVA, but your statements are still
+precise and understandable by a student who has taken the data structure course, i.e.,
+has basic knowledge about programming. Note that in your pseudo-code, you can use
+statement such as
+If transitionTable[i][j].action is move.
+Your pseudo-code should cover the major idea how you recognize a token, reflect the
+“longest possible” principle to find a token, how the tokens read and write are recog
+nized etc.
+5. The test cases to test the correctness of your program with explanation why you select
+them.
+6. Acknowledgment of people and their contribution to your project.
+
+Implementation. As for implementation (program), the minimal expectation is a finished im
+plementation which means the source code is compilable to an executable and, the executable
+behaves correctly at least most of the time.
