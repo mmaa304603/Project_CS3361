@@ -85,11 +85,4 @@ five 5
 Note that your scanner does NOT output the token of comment. In face, your function scan should completely ignore all comments in the input. In the example, the next token of times is id, instead of comments.
 
 ### notes
-Note that the DFA does not fully respect the production rule on id (i.e., the DFA will take read and write as id while they should be taken as a token of read and a token of write respectively). So, your scanner returns an ID token only if the id is not read or write. When the id is read or write, your scanner should return the token read and write respectively.
-
-### submission: Submit a zip file containing the following to Canvas by the project due date.
-1. Your report (either PDF or text files). The name of your file must start with “report”.
-2. The source code for the scanner which must be compilable to an executable file using
-command line instead of IDE. For C/C++: source code must be gcc/g++ compilable.
-3. Areadme file on howtocompile the source code and how to run the executable.
-4. Programming language to use: python/C/C++. Talk to TA if you have to use a different language
+Note that the DFA does not fully respect the production rule on id (i.e., the DFA will take read and write as id while they should be taken as a token of read and a token of write respectively). So, the scanner returns an ID token only if the id is not read or write. When the id is read or write, scanner should return the token read and write respectively.
