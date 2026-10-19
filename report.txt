@@ -1,63 +1,391 @@
-1. Introduction. Whatever special thing you want to show can go here. It should not be long.
-2. Production rules
+CS3361 Concepts of Programming Languages - Project 1: Building a Scanner
+Team members: Jaechang Kim, Masaki Kajikuri, Abenezer Setegn
+Language: C (C11, compiled with gcc)
 
-The scanner recognizes the following lexical production rules:
 
-```
-assign  -> :=
-plus    -> +
-minus   -> -
-times   -> *
-div     -> /
-lparen  -> (
-rparen  -> )
-id      -> letter (letter | digit)*, except read and write
-number  -> digit digit* | digit* ('.' digit | digit '.') digit*
-comment -> '/*' (non-* | '*' non-/)* '*/'
-           | '//' (non-newline)* newline
-read    -> read
-write   -> write
-```
+1. Introduction
+===============
 
-Comments and whitespace are skipped and do not produce tokens. The scanner
-uses the longest possible valid token rule; therefore `read1` is an `id`, not
-the token `read` followed by another token.
+This project implements a scanner for the calculator-language tokens defined
+by the regular expressions on page 54 of the textbook. The scanner is built
+directly on the DFA from page 57: every character read moves the automaton
+from one state to another, and a token is recognized when the automaton is in
+a final state and the next character cannot extend the token.
 
-3. Specify the important data structure(s) you will use in your scanner algorithm. The speci
-fication should be independent of any specific programming language such as JAVA. Here
-is an example of specifying a data structure.
-To specify a data structure for the table in Fig 2.12 in the textbook, we need the following
-data structure with a name transitionTable:
-(a) transitionTable is a two dimensional array. The first dimension is indexed from
-1 to 18 (the number of states) and the second dimension is indexed from 1 to 14 with
-1 representing white spaces (space, tab, newline), 2 representing the character /, ···,
-14 representing any letter.
-(b) For any integer i and j, transitionTable[i][j] is a record with field names
-i. action and newState.
-ii. action can take values of move, recognize,stuck.
-transitionTable[i][j].action=move means that the automata should move to
-next state and transitionTable[i][j].newState is the state to move to.
-4
-transitionTable[i][j].move = recognize means that i is a final state and the
-automata can not move to any other state with the input character corresponding to
-the number j, i.e., we recognize a token!
-transitionTable[i][j].move = stuck means that the the automata can not get
-to any state from state i with a character corresponding to the number j.
-4. The pseudo-code. For each function in your pseudo-code, you MUST have input, output
-and how output is related to input. As for pseudo-code statements you can use to describe
-your algorithm, please refer to the sample pseudo-code given in Section 1. The principle
-is not to use statements in a specific language such as JAVA, but your statements are still
-precise and understandable by a student who has taken the data structure course, i.e.,
-has basic knowledge about programming. Note that in your pseudo-code, you can use
-statement such as
-If transitionTable[i][j].action is move.
-Your pseudo-code should cover the major idea how you recognize a token, reflect the
-“longest possible” principle to find a token, how the tokens read and write are recog
-nized etc.
-5. The test cases to test the correctness of your program with explanation why you select
-them.
-6. Acknowledgment of people and their contribution to your project.
+Token rules handled:
 
-Implementation. As for implementation (program), the minimal expectation is a finished im
-plementation which means the source code is compilable to an executable and, the executable
-behaves correctly at least most of the time.
+    assign  -> :=
+    plus    -> +
+    minus   -> -
+    times   -> *
+    div     -> /
+    lparen  -> (
+    rparen  -> )
+    id      -> letter (letter | digit)*        except read and write
+    number  -> digit digit* | digit* (. digit | digit .) digit*
+    comment -> /* (non-* | * non-/)* *+/ | // (non-newline)* newline
+    read    -> read
+    write   -> write
+
+Special points of this implementation:
+  (a) Longest possible token: number and id states keep consuming characters
+      as long as the DFA can move. The one extra character that stops the
+      token is pushed back so the next call to scan sees it.
+  (b) read / write: the DFA itself accepts read and write as id. The scanner
+      therefore scans the complete identifier first and only then checks
+      whether it is exactly "read" or exactly "write". So "read1" and
+      "reads" are id, not read followed by something else.
+  (c) Comments and whitespace never produce tokens; scan skips them and keeps
+      going until it finds a real token.
+  (d) All-or-nothing output: tokens are stored and printed only after the
+      whole file has been scanned without error. If any error occurs, the
+      only output is "error".
+
+
+2. Important Data Structures
+============================
+
+2.1 charClass (classification of input characters)
+   charClass is a function from a character to one of the following 12
+   classes, numbered 1 to 12:
+       1 whitespace (space, tab, newline, carriage return)
+       2 /        3 *        4 (        5 )        6 +        7 -
+       8 :        9 =       10 .
+      11 digit (0-9)
+      12 letter (a-z, A-Z)
+   Any other character belongs to no class; seeing it in state 1 is an error.
+   In addition, EOF (end of file) is treated as a special input symbol.
+
+2.2 transitionTable (the DFA of page 57)
+   transitionTable is a two-dimensional array. The first dimension is the
+   state (1 to 16), the second dimension is a character class from 2.1
+   (plus EOF).
+   For any state i and class j, transitionTable[i][j] is a record with the
+   fields action and newState:
+     - action can take the values move, recognize, stuck.
+     - action = move: the automaton moves to state newState and the character
+       is consumed.
+     - action = recognize: i is a final state and the automaton cannot move
+       with character class j; the token of state i is recognized and the
+       character is restored to the input (it belongs to the next token).
+     - action = stuck: the automaton cannot move and i is not a final state;
+       this is a lexical error.
+   States used:
+       1     start state (whitespace stays in state 1)
+       2     seen "/" - final for div; may still become a comment
+       3     inside // comment (newline goes back to state 1)
+       4     inside /* comment
+       5     inside /* comment after one or more "*" ("/" goes back to 1)
+       6-10  final states for ( ) + - *   (recognized immediately)
+       11    seen ":" - not final, needs "="
+       12    final state for assign  (":=" recognized immediately)
+       13    seen leading "." - not final, needs a digit
+       14    integer digits - final for number
+       15    digits after "." - final for number
+       16    identifier - final for id (read/write checked afterwards)
+
+   Transition table (only entries that are not "stuck" are listed):
+
+     State | Input                    | Action
+     ------+--------------------------+-------------------------------------
+       1   | whitespace               | move to 1
+       1   | /                        | move to 2
+       1   | (  )  +  -  *            | move to 6..10 -> recognize at once
+       1   | :                        | move to 11
+       1   | .                        | move to 13
+       1   | digit                    | move to 14
+       1   | letter                   | move to 16
+       1   | EOF                      | no more tokens (END)
+       2   | /                        | move to 3
+       2   | *                        | move to 4
+       2   | anything else, EOF       | recognize div
+       3   | newline                  | move to 1
+       3   | any other character      | move to 3
+       4   | *                        | move to 5
+       4   | any other character      | move to 4
+       5   | /                        | move to 1
+       5   | *                        | move to 5
+       5   | any other character      | move to 4
+      11   | =                        | move to 12 -> recognize assign
+      13   | digit                    | move to 15
+      14   | digit                    | move to 14
+      14   | .                        | move to 15
+      14   | anything else, EOF       | recognize number
+      15   | digit                    | move to 15
+      15   | anything else, EOF       | recognize number
+      16   | letter, digit            | move to 16
+      16   | anything else, EOF       | recognize id / read / write
+     All other combinations (e.g. state 11 with anything but "=", state 13
+     with a non-digit, EOF in states 3, 4, 5) are stuck -> error.
+
+   Implementation note: following the "nested case statement" style of
+   section 2.2.2, the C program encodes this table as a case statement on the
+   current state (outer) and the current character (inner) instead of
+   storing an explicit array. The behavior is exactly the table above.
+   States 6-10 and 12 have no outgoing transitions, so the program returns
+   their token immediately instead of storing the state number.
+
+2.3 finalStateToToken
+   An array indexed by final state giving the token type:
+     2 -> div, 6 -> lparen, 7 -> rparen, 8 -> plus, 9 -> minus,
+     10 -> times, 12 -> assign, 14 -> number, 15 -> number, 16 -> id.
+
+2.4 inputStream
+   The input file, viewed as a sequence of characters with a current
+   position. Operations:
+     readNext(inputStream): returns the character at the current position
+       and advances the position; returns EOF at the end.
+     restoreOne(inputStream, c): moves the position back by one so that c
+       will be read again (used for the lookahead character).
+
+2.5 keywordPrefix and keywordLength
+   keywordPrefix holds the first (at most 5) characters of the identifier
+   being scanned; keywordLength is the identifier's length, capped at 6
+   (6 means "longer than 5"). This is enough to decide whether the
+   identifier is exactly "read" (length 4) or "write" (length 5).
+
+2.6 tokenSequence
+   An ordered list of token types, initially empty, that grows as needed.
+   It keeps every recognized token until the whole file is known to be
+   valid.
+
+2.7 tokenType
+   One of: assign, plus, minus, times, div, lparen, rparen, id, number,
+   read, write, plus two special flags END (no more tokens) and ERROR.
+
+
+3. Pseudocode
+=============
+
+3.1 scan
+   input:  inputStream - the opened input file; precondition: the current
+           position is not at EOF.
+   output: tokenType - the type of the longest valid token starting at the
+           current position (after skipping whitespace and comments);
+           ERROR if no valid token starts there; END if only whitespace or
+           comments remain.
+   data:
+     state:  the current DFA state (an integer, 1..16)
+     c:      the character just read from inputStream (or EOF)
+     keywordPrefix, keywordLength: see 2.5
+   plan:
+     state := 1
+     keywordPrefix := empty;  keywordLength := 0
+     repeat forever
+        c := readNext(inputStream)
+        case state of
+          1: if c is EOF then return END
+             else if c is whitespace then state := 1            // skip
+             else if c is "/" then state := 2
+             else if c is "(" then return lparen               // state 6
+             else if c is ")" then return rparen               // state 7
+             else if c is "+" then return plus                 // state 8
+             else if c is "-" then return minus                // state 9
+             else if c is "*" then return times                // state 10
+             else if c is ":" then state := 11
+             else if c is "." then state := 13
+             else if c is a digit then state := 14
+             else if c is a letter then
+                  state := 16
+                  keywordPrefix := c;  keywordLength := 1
+             else return ERROR                                 // stuck
+
+          2: if c is "/" then state := 3                       // line comment
+             else if c is "*" then state := 4                  // block comment
+             else
+                  restoreOne(inputStream, c)   // c belongs to next token
+                  return div
+
+          3: if c is newline then state := 1    // comment done, start over
+             else if c is EOF then return ERROR
+             else state := 3
+
+          4: if c is EOF then return ERROR
+             else if c is "*" then state := 5
+             else state := 4
+
+          5: if c is EOF then return ERROR
+             else if c is "/" then state := 1   // comment done, start over
+             else if c is "*" then state := 5
+             else state := 4
+
+         11: if c is "=" then return assign                     // state 12
+             else return ERROR
+
+         13: if c is a digit then state := 15
+             else return ERROR
+
+         14: if c is a digit then state := 14
+             else if c is "." then state := 15
+             else
+                  restoreOne(inputStream, c)
+                  return number
+
+         15: if c is a digit then state := 15
+             else
+                  restoreOne(inputStream, c)
+                  return number
+
+         16: if c is a letter or a digit then
+                  if keywordLength < 5 then append c to keywordPrefix
+                  keywordLength := min(keywordLength + 1, 6)
+                  state := 16
+             else
+                  restoreOne(inputStream, c)
+                  if keywordLength = 4 and keywordPrefix = "read" then
+                       return read
+                  else if keywordLength = 5 and keywordPrefix = "write" then
+                       return write
+                  else
+                       return id
+        end case
+     end repeat
+   (restoreOne does nothing when c is EOF. If restoring fails, scan returns
+   ERROR; this check is omitted above for readability.)
+
+   How the "longest possible token" rule is achieved:
+     - In states 14, 15 and 16 the scanner keeps moving as long as the DFA
+       has a transition. It recognizes the token only when the next
+       character has no transition, i.e. when the token cannot get longer.
+       Example: "12.34" is one number, not number "12" + something.
+       Example: "5.5.5" gives number "5.5" then number ".5".
+     - In state 2, "/" is not reported as div right away: the scanner first
+       looks at the next character, because "//" or "/*" would make a longer
+       lexeme (a comment).
+     - In state 11, ":" waits for "=" to form assign.
+     - The extra lookahead character is always restored, so no character is
+       lost between tokens.
+
+   How read and write are recognized:
+     The DFA accepts read and write in state 16 like any other id. Because
+     state 16 only finishes after the whole identifier has been consumed,
+     the keyword check is done on the complete identifier: exactly "read"
+     -> read, exactly "write" -> write, anything else (e.g. "read1",
+     "reads", "Read", "writ") -> id.
+
+3.2 appendToken
+   input:  tokenSequence, a tokenType t
+   output: true if t was added to the end of tokenSequence, false if there
+           was no memory to grow the sequence.
+   plan:
+     if tokenSequence is full then
+          enlarge tokenSequence (double its capacity)
+          if enlarging fails then return false
+     add t at the end of tokenSequence
+     return true
+
+3.3 tokenName
+   input:  a tokenType t (not END, not ERROR)
+   output: the printable name of t, e.g. times -> "times", id -> "id".
+   plan:
+     return the name corresponding to t
+
+3.4 main
+   input:  the command line, which must contain exactly one file name
+   output: prints "error" if the file cannot be opened or contains any
+           invalid token; otherwise prints "(t1, t2, ...)" listing the token
+           types of the file in order.
+   data:
+     tokenSequence: see 2.6
+     errorFlag: true once any error has happened
+   plan:
+     if the number of file names is not 1 then print "error"; stop
+     open the file as inputStream; if it fails then print "error"; stop
+     tokenSequence := empty;  errorFlag := false
+     while inputStream is not at EOF        // precondition of scan
+          t := scan(inputStream)
+          if t is END then exit loop        // only whitespace/comments left
+          if t is ERROR then errorFlag := true; exit loop
+          if appendToken(tokenSequence, t) is false then
+               errorFlag := true; exit loop
+     close inputStream
+     if errorFlag then print "error"; stop
+     print "(" followed by tokenName of each token in tokenSequence
+           separated by ", ", followed by ")"
+
+
+4. Test Cases
+=============
+
+All tests were run with the executable built by
+    gcc -std=c11 -Wall -Wextra -pedantic -o scanner scanner.c
+(no warnings). "\n" means a newline character. Every test below produced
+exactly the expected output.
+
+ #  Input                          Expected / actual output
+ -- ------------------------------ ----------------------------------------
+ 1  read\n/* foo\nbar */\n2\n*\n    (read, number, times, id, number)
+    five 5\n
+    Why: example from the assignment (with the line "2"); multi-line block
+    comment is skipped, read keyword, number, times, id.
+
+ 2  :=+-*/()                       (assign, plus, minus, times, div,
+                                    lparen, rparen)
+    Why: every operator / parenthesis token, written with no spaces, so
+    each one must end exactly where the next begins.
+
+ 3  read write read1 writer Read\n (read, write, id, id, id)
+    Why: exact keywords vs. identifiers that only start with a keyword, and
+    case sensitivity ("Read" is an id).
+
+ 4  rea wri writ5 reads            (id, id, id, id)
+    Why: identifiers shorter/longer than the keywords; checks that the
+    length check (keywordLength) works.
+
+ 5  0 42 .5 5. 45.67\n             (number, number, number, number, number)
+    Why: every number form allowed by the rule: integer, leading dot,
+    trailing dot, digits on both sides.
+
+ 6  read123 12.34 :=               (id, number, assign)
+    Why: longest possible token - each lexeme must not be split early.
+
+ 7  5.5.5                          (number, number)
+    Why: longest match then restart: "5.5" is the longest number, then
+    ".5" is the next number.
+
+ 8  a/b                            (id, div, id)
+    Why: "/" followed by a non-comment character must be div, and the
+    restored "b" must not be lost.
+
+ 9  a// xyz\nb /*xx***/ c          (id, id, id)
+    Why: both comment forms, and a block comment ending with several "*"
+    (state 5 staying in 5).
+
+10  x:=y/*c*/+2 // end\n           (id, assign, id, plus, number)
+    Why: comments placed directly between tokens, a realistic statement.
+
+11  /**/                           ()
+    Why: shortest block comment; a file with only a comment has no tokens.
+
+12  [empty file], and "   \n\t"     ()
+    Why: no tokens at all; only whitespace returns END correctly.
+
+13  read x @ 123\n                 error
+    Why: invalid character; output must be only "error" even though valid
+    tokens came before it.
+
+14  a : 2                          error
+    Why: ":" without "=" is stuck in state 11.
+
+15  .                              error
+    Why: "." without a digit is stuck in state 13.
+
+16  foo /* broken                  error
+    Why: block comment never closed (EOF in state 4).
+
+17  read // comment   (no newline) error
+    Why: the comment rule requires // comments to end with a newline, so
+    EOF in state 3 is an error.
+
+
+5. Acknowledgments
+==================
+
+Jaechang Kim: wrote the first draft of the scanner (C code) and the report.
+Masaki Kajikuri: revised the report (data structures, pseudocode, test
+  cases), tested the program and wrote the README.
+Abenezer Setegn: worked on a separate draft of the report.
+
+The token grammar and the DFA come from the course textbook (pages 54 and
+57) and the assignment specification. AI assistants (ChatGPT, Claude) were
+used to help review the code, run the tests and edit this report.
