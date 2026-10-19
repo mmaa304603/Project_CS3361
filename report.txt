@@ -382,8 +382,7 @@ exactly the expected output.
 ==================
 
 Jaechang Kim: wrote the first draft of the scanner (C code) and the report.
-Masaki Kajikuri: revised the report (data structures, pseudocode, test
-  cases), tested the program and wrote the README.
+Masaki Kajikuri: revised the report, tested the program and wrote the README.
 Abenezer Setegn: worked on a separate draft of the report.
 
 The token grammar and the DFA come from the course textbook (pages 54 and
