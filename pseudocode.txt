@@ -1,41 +1,188 @@
-<example>
-Data
-   finalStateToToken: an array. finalStateToToken[i], where i is a state, is the token type corresponding to state i. 
-   finalStateToToken: an array. finalStateToToken[i] is the token name corresponding to the state i.  
+CS3361 Project 1 — Annotated pseudocode matching scanner.c
+=============================================================
 
-scan
-   input: 
-      s: string
-   output: 
-      token: the first token in s  
+PURPOSE
+  // Read a calculator-language source file and identify token TYPES.
+  // This is lexical analysis: the scanner does not execute calculations.
+  // Comments and whitespace are ignored, and invalid input causes "error".
 
-   data: 
-       cstate: current state (a number)
-       PointerCurChar: …. [explanation must be given for a piece of data as done above] 
-       curChar: …  
-       nextState: …
-   plan 
-       cState := 1
-       PointerCurChar := 0
-       while PointerCurChar is not at the end of s 
-                nextState := getNextState(cState, i[PointerCurChar]); 
-                if (nextState == -1) 
-                   if(cState is final) 
-                                // token is the whatever token represented by cStat
-                                token := finalStateToToken[cState]
-                   else 
-                                report error
-                                end program    
-                else
-                     cState := nextState
-                     PointerCurChar ++,
+DATA / STATE
+  TokenType = END, ERROR, ASSIGN, PLUS, MINUS, TIMES, DIV,
+              LPAREN, RPAREN, ID, NUMBER, READ, WRITE
+    // Internal names that the C program returns for recognized tokens.
 
+  state = START
+    // Keeps track of the current state in the deterministic finite automaton.
+    // A new call to scan() begins in START.
 
+  word = buffer for up to 5 letters, length = 0
+    // Only needed to check the exact reserved words "read" and "write".
+    // Longer names are still recognized as identifiers.
 
-getNextState
-   input 
-cState: … 
-cChar: … 
-   output 
-s: the next state following cState and cChar (next state is -1 if there is no next state)
+  tokenSequence = expandable list of TokenType
+    // Store results first so invalid files print only "error".
 
+FUNCTION put_back(c, input)
+  // The scanner sometimes reads one character too far.
+  // Restore that character so the NEXT call to scan() can use it.
+  if c is EOF: return success
+  otherwise: return whether ungetc(c, input) succeeds
+
+FUNCTION scan(input) RETURNS TokenType
+  // Recognize the next token using one character at a time.
+  state = START
+  word = empty; length = 0
+  repeat forever:
+    c = read one character from input
+
+    switch state:
+
+      START:
+        // Decide which token or comment begins with this character.
+        if c is EOF: return END
+        if c is whitespace: remain in START
+        else if c == '/': state = SLASH
+        else if c == '(': return LPAREN
+        else if c == ')': return RPAREN
+        else if c == '+': return PLUS
+        else if c == '-': return MINUS
+        else if c == '*': return TIMES
+        else if c == ':': state = COLON
+        else if c == '.': state = LEADING_DOT
+        else if c is a digit: state = INTEGER
+        else if c is a letter:
+          state = IDENTIFIER
+          word begins with c
+          length = 1
+        else: return ERROR
+          // Example: '@' is not a valid starting character.
+
+      SLASH:
+        // '/' may be DIV, '//' line comment, or '/*' block comment.
+        if c == '/': state = LINE_COMMENT
+        else if c == '*': state = BLOCK_COMMENT
+        else:
+          if put_back(c, input) fails: return ERROR
+          return DIV
+
+      LINE_COMMENT:
+        // Ignore everything until a newline.
+        if c == newline: state = START
+        else if c is EOF: return ERROR
+          // The implemented rule requires a terminating newline.
+        otherwise: continue ignoring comment characters
+
+      BLOCK_COMMENT:
+        // Keep ignoring characters until '*' suggests the comment may end.
+        if c is EOF: return ERROR
+        if c == '*': state = BLOCK_STARS
+        otherwise: remain in BLOCK_COMMENT
+
+      BLOCK_STARS:
+        // After '*', a '/' closes the block comment.
+        if c is EOF: return ERROR
+        if c == '/': state = START
+        else if c != '*': state = BLOCK_COMMENT
+        otherwise: remain in BLOCK_STARS
+
+      COLON:
+        // ':' alone is invalid; ':=' means ASSIGN.
+        if c == '=': return ASSIGN
+        otherwise: return ERROR
+
+      LEADING_DOT:
+        // Numbers like '.5' are valid but '.' alone is not.
+        if c is a digit: state = DECIMAL
+        otherwise: return ERROR
+
+      INTEGER:
+        // Continue reading the longest possible number.
+        if c is a digit: remain in INTEGER
+        else if c == '.': state = DECIMAL
+        else:
+          if put_back(c, input) fails: return ERROR
+          return NUMBER
+
+      DECIMAL:
+        // Digits can follow '.', e.g. 12.34; '5.' is also accepted.
+        if c is a digit: remain in DECIMAL
+        otherwise:
+          if put_back(c, input) fails: return ERROR
+          return NUMBER
+
+      IDENTIFIER:
+        // Names can contain letters and digits after the first letter.
+        if c is a letter or digit:
+          if length < 5: append c to word
+          if length < 6: increase length by 1
+          remain in IDENTIFIER
+        otherwise:
+          if put_back(c, input) fails: return ERROR
+          if length == 4 AND word == "read": return READ
+          if length == 5 AND word == "write": return WRITE
+          return ID
+          // 'read1', 'writer', and 'Read' are all ID.
+
+FUNCTION token_name(token) RETURNS string
+  // Convert an internal token to the output word displayed to the user.
+  ASSIGN -> "assign"; PLUS -> "plus"; MINUS -> "minus"
+  TIMES -> "times"; DIV -> "div"; LPAREN -> "lparen"
+  RPAREN -> "rparen"; ID -> "id"; NUMBER -> "number"
+  READ -> "read"; WRITE -> "write"
+  for any other token: no printable name
+
+FUNCTION append_token(tokenSequence, token) RETURNS success/failure
+  // Store one token and dynamically increase array size if needed.
+  if current count equals capacity:
+    choose capacity 32 when currently empty, otherwise double capacity
+    if capacity arithmetic would overflow: return failure
+    attempt to resize the array
+    if memory allocation fails: return failure
+  insert token at the end of the array
+  increase token count
+  return success
+
+FUNCTION main(commandLine)
+  // Run the scanner on the file passed by the user.
+  if the user did not supply exactly one input file name:
+    print "error" and exit with failure
+
+  open the named input file
+  if opening fails: print "error" and exit with failure
+
+  tokenSequence = empty; invalid = false
+  repeat:
+    // Look ahead to check EOF before calling scan().
+    c = read next character
+    if c is EOF: stop loop
+    if restoring c fails: invalid = true; stop loop
+
+    token = scan(input)
+    if token == END: stop loop
+    if token == ERROR OR append_token fails:
+      invalid = true
+      stop loop
+
+  if the input stream has a read error: invalid = true
+  if closing the file fails: invalid = true
+
+  if invalid:
+    print ONLY "error"
+    free tokenSequence memory
+    exit with failure
+
+  print '(' then all stored token names separated by ', ' then ')'
+  free tokenSequence memory
+  exit successfully
+
+EXAMPLE TRACE
+  Input:  read score := 10 + 5
+  Tokens: READ, ID, ASSIGN, NUMBER, PLUS, NUMBER
+  Output: (read, id, assign, number, plus, number)
+
+WHY THIS DESIGN?
+  // The DFA state determines what characters are allowed next.
+  // Lookahead allows the scanner to recognize the longest valid token.
+  // Restoring lookahead prevents a character from being lost.
+  // Delaying printing prevents partial output if a later error is found.
+  // This outline describes the existing C c
