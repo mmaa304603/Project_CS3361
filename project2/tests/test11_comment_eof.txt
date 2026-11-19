@@ -1,0 +1,1 @@
+read a // comment without newline

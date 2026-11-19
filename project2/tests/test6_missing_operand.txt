@@ -1,0 +1,3 @@
+read A
+B := A +
+write B
