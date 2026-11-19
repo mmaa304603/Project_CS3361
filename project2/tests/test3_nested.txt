@@ -1,2 +1,3 @@
+/* Team: Jaechang Kim, Masaki Kajikuri, Abenezer Setegn */
 x := (a + 3.14) * (b - .5) / c
 write x
