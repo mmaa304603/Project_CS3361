@@ -1,0 +1,379 @@
+CS3361 Concepts of Programming Languages - Project 2: Building a Parser
+Team members: Jaechang Kim, Masaki Kajikuri, Abenezer Setegn
+Language: C (C11, compiled with gcc)
+
+
+1. Introduction
+===============
+
+This project implements a recursive descent parser for the calculator
+grammar:
+
+    <program>   -> <stmt_list> $$
+    <stmt_list> -> <stmt> <stmt_list> | e
+    <stmt>      -> id assign <expr> | read id | write <expr>
+    <expr>      -> <term> <term_tail>
+    <term_tail> -> <add_op> <term> <term_tail> | e
+    <term>      -> <factor> <fact_tail>
+    <fact_tail> -> <mult_op> <factor> <fact_tail> | e
+    <factor>    -> lparen <expr> rparen | id | number
+    <add_op>    -> plus | minus
+    <mult_op>   -> times | div
+
+The parser uses the scan() function of our Project 1 scanner. Each call to
+scan() returns ONE token. The parser keeps that token as a one-token
+lookahead and has one function per non-terminal. Each function chooses a
+production by looking only at the lookahead token (the grammar is LL(1)), so
+no backtracking is needed.
+
+Special points of this implementation:
+  (a) Project 1 scanner reused: scan() keeps the same DFA states and the same
+      nested case statement as in Project 1. The only extension is that the
+      characters of each token are saved in a lexeme buffer, so the parse
+      tree can print both the token type and its value, e.g. <id> A </id>.
+      Because the full lexeme is now saved, the keyword check for read/write
+      compares the whole lexeme instead of the 5-character keywordPrefix of
+      Project 1. The behavior is the same.
+  (b) $$ pseudo-token: scan() returns TOK_END when it hits the end of the
+      file without a lexical error. The parser treats TOK_END as $$.
+  (c) Early error detection: for an epsilon production, the function checks
+      that the lookahead is in the FOLLOW set of the non-terminal. If it is
+      not, the error is reported right away.
+  (d) "Error" only: the tree is written to an output buffer first and is
+      printed only after program() finishes successfully. On a lexical or
+      syntax error the program prints only "Error" and stops, so a partial
+      tree is never shown. This is the same all-or-nothing idea we used in
+      Project 1.
+
+FIRST and FOLLOW sets used for the decisions:
+
+    Non-terminal   FIRST                     FOLLOW
+    stmt_list      id read write  e          $$
+    stmt           id read write             id read write $$
+    expr           lparen id number          rparen id read write $$
+    term_tail      plus minus  e             rparen id read write $$
+    term           lparen id number          plus minus rparen id read write $$
+    fact_tail      times div  e              plus minus rparen id read write $$
+    factor         lparen id number          times div plus minus rparen
+                                             id read write $$
+    add_op         plus minus                lparen id number
+    mult_op        times div                 lparen id number
+
+
+2. Important Data Structures
+============================
+
+2.1 TokenType
+   An enum: TOK_ASSIGN, TOK_PLUS, TOK_MINUS, TOK_TIMES, TOK_DIV, TOK_LPAREN,
+   TOK_RPAREN, TOK_ID, TOK_NUMBER, TOK_READ, TOK_WRITE, plus TOK_END (the
+   pseudo-token $$) and TOK_ERROR (lexical error).
+
+2.2 DFA of the scanner (from Project 1)
+   States 1-16 of the textbook DFA (page 57), encoded as a nested case
+   statement in scan(): the outer case is the current state and the inner
+   if/else is the current character.
+       1  START          2  SLASH (final for div)
+       3  LINE_COMMENT   4  BLOCK_COMMENT     5  BLOCK_STARS
+      11  COLON          13 LEADING_DOT
+      14  INTEGER (final for number)   15 DECIMAL (final for number)
+      16  IDENTIFIER (final for id; read/write checked afterwards)
+   The single-character tokens ( ) + - * and assign are returned at once.
+   put_back() (ungetc) restores the one lookahead character that ends a
+   token, so the next call to scan() reads it again.
+
+2.3 lexeme buffer (new in Project 2)
+   lexeme  : a dynamically allocated character array (grows with realloc)
+   lex_len : number of characters in it
+   It holds the characters of the token that scan() returned last.
+   lex_reset() empties it at the start of each token, lex_add(c) appends a
+   character each time the DFA consumes c as part of the token.
+
+2.4 lookahead / lookahead_value
+   lookahead is the TokenType of the current token, and lookahead_value is a
+   copy of its lexeme. next_token() calls scan() and updates both.
+
+2.5 output buffer
+   out     : a dynamically allocated string (grows with realloc)
+   depth   : the current tree level; each level is indented by 3 spaces
+   emit(level, text) appends one line with (3 * level) spaces of indent.
+
+2.6 Call stack
+   The C call stack of the recursive parse functions is the (implicit) parse
+   stack: when stmt() calls expr(), which calls term(), the active calls are
+   the path from the root of the parse tree to the current node.
+
+
+3. Pseudocode
+=============
+
+3.1 scan
+   input:  input - the opened input file, positioned after the last token.
+   output: tokenType - the type of the longest valid token starting at the
+           current position (whitespace and comments are skipped);
+           TOK_END if only whitespace/comments remain; TOK_ERROR if no
+           valid token starts there. The token's characters are in lexeme.
+   relation: the returned token is the longest prefix of the remaining input
+           that the DFA accepts (longest possible token rule).
+   plan:
+     state := 1;  lex_reset()
+     repeat forever
+        c := readNext(input)
+        case state of
+          1: if c is EOF then return TOK_END
+             else if c is whitespace then state := 1          // skip
+             else
+                  lex_reset(); lex_add(c)                     // new token
+                  if c is "/" then state := 2
+                  else if c is "(" then return TOK_LPAREN
+                  else if c is ")" then return TOK_RPAREN
+                  else if c is "+" then return TOK_PLUS
+                  else if c is "-" then return TOK_MINUS
+                  else if c is "*" then return TOK_TIMES
+                  else if c is ":" then state := 11
+                  else if c is "." then state := 13
+                  else if c is a digit then state := 14
+                  else if c is a letter then state := 16
+                  else return TOK_ERROR
+          2: if c is "/" then state := 3                      // line comment
+             else if c is "*" then state := 4                 // block comment
+             else put_back(c); return TOK_DIV
+          3: if c is newline then state := 1
+             else if c is EOF then return TOK_ERROR
+          4: if c is EOF then return TOK_ERROR
+             else if c is "*" then state := 5
+          5: if c is EOF then return TOK_ERROR
+             else if c is "/" then state := 1
+             else if c is not "*" then state := 4
+         11: if c is "=" then lex_add(c); return TOK_ASSIGN
+             else return TOK_ERROR
+         13: if c is a digit then lex_add(c); state := 15
+             else return TOK_ERROR
+         14: if c is a digit then lex_add(c)
+             else if c is "." then lex_add(c); state := 15
+             else put_back(c); return TOK_NUMBER
+         15: if c is a digit then lex_add(c)
+             else put_back(c); return TOK_NUMBER
+         16: if c is a letter or digit then lex_add(c)
+             else
+                  put_back(c)
+                  if lexeme = "read" then return TOK_READ
+                  if lexeme = "write" then return TOK_WRITE
+                  return TOK_ID
+        end case
+     end repeat
+
+3.2 next_token
+   input:  the input file.
+   output: lookahead and lookahead_value set to the next token.
+   relation: lookahead = scan(input); lookahead_value = copy of lexeme
+           ("" for $$). On TOK_ERROR the program prints "Error" and stops.
+
+     lookahead := scan(input)
+     if lookahead = TOK_ERROR then fail()
+     lookahead_value := copy of lexeme
+
+3.3 match(expected)
+   input:  expected - a token type; the current lookahead.
+   output: three lines "<type>", "   value", "</type>" added to the output
+           buffer; lookahead moves to the next token.
+   relation: the printed token is exactly the lookahead that was consumed.
+           If lookahead is not expected, it is a syntax error.
+
+     if lookahead != expected then fail()
+     emit(depth,   "<" + name(lookahead) + ">")
+     emit(depth+1, lookahead_value)
+     emit(depth,   "</" + name(lookahead) + ">")
+     next_token()
+
+3.4 open_nt(name) / close_nt(name)
+   input:  a non-terminal name; the current depth.
+   output: "<name>" or "</name>" added to the buffer at the current indent.
+   relation: open_nt prints and then increases depth; close_nt decreases
+           depth and then prints. So every child is indented one level more
+           than its parent, and every open tag has a matching close tag.
+
+3.5 fail
+   input:  none.  output: "Error" on the console; the program stops.
+   relation: called on any lexical or syntax error; the output buffer is
+           never printed.
+
+3.6 program
+   input:  the token stream (lookahead = first token).
+   output: the <Program> subtree in the buffer, or "Error".
+   relation: succeeds only if the whole input is a <stmt_list> followed by $$.
+
+     open_nt("Program")
+     stmt_list()
+     if lookahead != TOK_END then fail()
+     close_nt("Program")
+
+3.7 stmt_list
+   input:  lookahead.
+   output: the <stmt_list> subtree; all statements are consumed.
+   relation: lookahead in FIRST(stmt) = {id, read, write} -> <stmt> <stmt_list>;
+           lookahead in FOLLOW(stmt_list) = {$$} -> epsilon; else error.
+
+     open_nt("stmt_list")
+     if lookahead in {id, read, write} then stmt(); stmt_list()
+     else if lookahead = $$ then (epsilon)
+     else fail()
+     close_nt("stmt_list")
+
+3.8 stmt
+   input:  lookahead.
+   output: the <stmt> subtree; the tokens of one statement are consumed.
+   relation: the production is chosen by the first token.
+
+     open_nt("stmt")
+     if lookahead = id then match(id); match(assign); expr()
+     else if lookahead = read then match(read); match(id)
+     else if lookahead = write then match(write); expr()
+     else fail()
+     close_nt("stmt")
+
+3.9 expr
+   input:  lookahead.   output: the <expr> subtree.
+   relation: <expr> -> <term> <term_tail>.
+
+     open_nt("expr"); term(); term_tail(); close_nt("expr")
+
+3.10 term_tail
+   input:  lookahead.
+   output: the <term_tail> subtree; consumes "add_op term ..." if present.
+   relation: plus/minus -> <add_op> <term> <term_tail>;
+           lookahead in FOLLOW(term_tail) = {rparen, id, read, write, $$}
+           -> epsilon; else error.
+
+     open_nt("term_tail")
+     if lookahead in {plus, minus} then add_op(); term(); term_tail()
+     else if lookahead in {rparen, id, read, write, $$} then (epsilon)
+     else fail()
+     close_nt("term_tail")
+
+3.11 term
+   input:  lookahead.   output: the <term> subtree.
+   relation: <term> -> <factor> <fact_tail>.
+
+     open_nt("term"); factor(); fact_tail(); close_nt("term")
+
+3.12 fact_tail
+   input:  lookahead.
+   output: the <fact_tail> subtree; consumes "mult_op factor ..." if present.
+   relation: times/div -> <mult_op> <factor> <fact_tail>;
+           lookahead in FOLLOW(fact_tail) =
+           {plus, minus, rparen, id, read, write, $$} -> epsilon; else error.
+
+     open_nt("fact_tail")
+     if lookahead in {times, div} then mult_op(); factor(); fact_tail()
+     else if lookahead in {plus, minus, rparen, id, read, write, $$}
+          then (epsilon)
+     else fail()
+     close_nt("fact_tail")
+
+3.13 factor
+   input:  lookahead.   output: the <factor> subtree.
+   relation: lparen -> ( <expr> ); id -> id; number -> number; else error.
+
+     open_nt("factor")
+     if lookahead = lparen then match(lparen); expr(); match(rparen)
+     else if lookahead = id then match(id)
+     else if lookahead = number then match(number)
+     else fail()
+     close_nt("factor")
+
+3.14 add_op / mult_op
+   input:  lookahead.
+   output: the <add_op> (or <mult_op>) subtree with one operator token.
+   relation: add_op matches plus or minus; mult_op matches times or div.
+
+     open_nt("add_op")
+     if lookahead = plus then match(plus)
+     else if lookahead = minus then match(minus)
+     else fail()
+     close_nt("add_op")
+     (mult_op is the same with times / div)
+
+3.15 main
+   input:  command line "parser <input file name>".
+   output: the parse tree on the console, or only "Error".
+   relation: the tree is printed only if program() finishes with no error.
+
+     open the input file (error -> fail())
+     next_token()            // first lookahead
+     program()
+     print the output buffer
+
+
+4. Test Cases
+=============
+All files are in the tests/ folder.
+
+ #  File                       Input                          Expected
+ 1  test1_read.txt             read A                         tree
+    Why: the example in the specification; output must match it.
+ 2  test2_sample.txt           read A / read B /              tree
+                               sum := A + B / write sum /
+                               write sum / 2
+    Why: several statements, all three kinds of <stmt>, plus and div.
+ 3  test3_nested.txt           x := (a + 3.14) * (b - .5) / c  tree
+                               write x
+    Why: nested parentheses, all four operators, decimal numbers (3.14 and
+    .5 use DFA states 14/15 and 13/15), deep recursion.
+ 4  test4_comments.txt         /* block */ read n // line     tree
+                               write n * 2
+    Why: the scanner skips block and line comments; the last token is at
+    the end of the file with no newline.
+ 5  test5_empty.txt            (empty file)                   tree
+    Why: the first token is $$, so stmt_list uses epsilon.
+ 6  test6_missing_operand.txt  read A / B := A + / write B    Error
+    Why: after "+" a <term> is expected but "write" is found; factor()
+    detects that "write" is not in FIRST(factor).
+ 7  test7_unbalanced.txt       x := (a + b                    Error
+    Why: match(rparen) fails because $$ is found.
+ 8  test8_lexical.txt          x = 5                          Error
+    Why: "=" without ":" is a lexical error from scan() (state 1 has no
+    transition on "=").
+ 9  test9_read_number.txt      read 5                         Error
+    Why: read must be followed by id, not number.
+10  test10_extra_rparen.txt    write (a))                     Error
+    Why: the extra ")" is not in FOLLOW(stmt_list), so stmt_list reports
+    the error (shows the FOLLOW-set check).
+11  test11_comment_eof.txt     read a // comment (no newline)  Error
+    Why: as in Project 1, a // comment must end with a newline (state 3 has
+    no transition on EOF), so this is a lexical error.
+
+Sample output for test 1:
+
+<Program>
+   <stmt_list>
+      <stmt>
+         <read>
+            read
+         </read>
+         <id>
+            A
+         </id>
+      </stmt>
+      <stmt_list>
+      </stmt_list>
+   </stmt_list>
+</Program>
+
+
+5. Acknowledgment
+=================
+  * Jaechang Kim, Masaki Kajikuri, Abenezer Setegn: (edit this part to
+    describe each member's actual contribution, e.g. scanner extension,
+    parser functions, testing, report.)
+  * Dr. Y. Zhang: lectures on recursive descent parsing and FIRST/FOLLOW
+    sets.
+  * Edward Wertz and Xiaozhen Xue: project specification.
+
+What we learned
+  * Because the grammar is LL(1), each parse function needs only the
+    current lookahead token to choose a production.
+  * Checking FOLLOW sets for epsilon productions finds an error at the
+    earliest point instead of letting it appear later in another function.
+  * A scanner that returns one token per call fits a recursive descent
+    parser well: the parser asks for the next token only when match()
+    consumes the current one.
