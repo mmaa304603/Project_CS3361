@@ -1,3 +1,4 @@
+/* Team: Jaechang Kim, Masaki Kajikuri, Abenezer Setegn */
 /* block
  comment */ read n // line comment
 write n * 2
