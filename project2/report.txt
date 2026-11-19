@@ -306,7 +306,10 @@ FIRST and FOLLOW sets used for the decisions:
 
 4. Test Cases
 =============
-All files are in the tests/ folder.
+All files are in the tests/ folder. Every test file starts with the comment
+/* Team: Jaechang Kim, Masaki Kajikuri, Abenezer Setegn */ so that our names
+appear in every file. The scanner skips this comment, so it does not change
+the result. The inputs below are shown without that first line.
 
  #  File                       Input                          Expected
  1  test1_read.txt             read A                         tree
@@ -321,10 +324,11 @@ All files are in the tests/ folder.
     .5 use DFA states 14/15 and 13/15), deep recursion.
  4  test4_comments.txt         /* block */ read n // line     tree
                                write n * 2
-    Why: the scanner skips block and line comments; the last token is at
-    the end of the file with no newline.
- 5  test5_empty.txt            (empty file)                   tree
-    Why: the first token is $$, so stmt_list uses epsilon.
+    Why: the scanner skips block and line comments (DFA states 2-5), and
+    a comment can appear in the middle of a line.
+ 5  test5_empty.txt            (only the team comment)        tree
+    Why: no real token, so the first token is $$ and stmt_list uses
+    epsilon (empty program).
  6  test6_missing_operand.txt  read A / B := A + / write B    Error
     Why: after "+" a <term> is expected but "write" is found; factor()
     detects that "write" is not in FIRST(factor).
@@ -338,9 +342,12 @@ All files are in the tests/ folder.
 10  test10_extra_rparen.txt    write (a))                     Error
     Why: the extra ")" is not in FOLLOW(stmt_list), so stmt_list reports
     the error (shows the FOLLOW-set check).
-11  test11_comment_eof.txt     read a // comment (no newline)  Error
-    Why: as in Project 1, a // comment must end with a newline (state 3 has
-    no transition on EOF), so this is a lexical error.
+11  test11_unclosed_comment.txt  read a                       Error
+                                 /* this comment is never closed
+    Why: the block comment never reaches "*/", so the scanner meets EOF in
+    state 4 (no transition on EOF). This is a lexical error, so scan()
+    returns TOK_ERROR and the parser prints only "Error", even though
+    "read a" before it is a correct statement.
 
 Sample output for test 1:
 
