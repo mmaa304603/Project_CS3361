@@ -1,2 +1,0 @@
-/* Team: Jaechang Kim, Masaki Kajikuri, Abenezer Setegn */
-read a // comment without newline
