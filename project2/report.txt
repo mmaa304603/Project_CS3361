@@ -369,18 +369,9 @@ Sample output for test 1:
 
 5. Acknowledgment
 =================
-  * Jaechang Kim, Masaki Kajikuri, Abenezer Setegn: (edit this part to
-    describe each member's actual contribution, e.g. scanner extension,
-    parser functions, testing, report.)
-  * Dr. Y. Zhang: lectures on recursive descent parsing and FIRST/FOLLOW
-    sets.
-  * Edward Wertz and Xiaozhen Xue: project specification.
+- Jaechang Kim: Refined parser, updated README
+- Masaki Kajikuri: Developed prototype paser and wrote report draft
+- Abenezer Setegn: (Write what you have done here!)
 
-What we learned
-  * Because the grammar is LL(1), each parse function needs only the
-    current lookahead token to choose a production.
-  * Checking FOLLOW sets for epsilon productions finds an error at the
-    earliest point instead of letting it appear later in another function.
-  * A scanner that returns one token per call fits a recursive descent
-    parser well: the parser asks for the next token only when match()
-    consumes the current one.
+Overal strucures and features come from the course textbook and the assignment specification. 
+AI assistants (ChatGPT, Claude) were used to help review the code, run the tests and edit this report.

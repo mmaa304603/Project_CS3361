@@ -25,7 +25,7 @@
  */
 
 #include <ctype.h>
-#include <stdarg.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -118,6 +118,10 @@ TokenType scan(FILE *input)
 
     for (;;) {
         int c = fgetc(input);
+
+        /* EOF can also signal a read failure, in any DFA state. */
+        if (c == EOF && ferror(input))
+            return TOK_ERROR;
 
         switch (state) {
 
@@ -290,52 +294,46 @@ static const char *token_name(TokenType token)
 
 static char  *out = NULL;
 static size_t out_len = 0;
-static size_t out_cap = 0;
 static int    depth = 0;           /* current tree level */
 
-#define INDENT "   "               /* 3 spaces per level */
+#define INDENT_WIDTH 3
 
-/* Append one line: (indent * level) + text + newline. */
-static void emit(int level, const char *fmt, ...)
+/* Append one indented line: prefix + text + suffix + newline. */
+static void emit(int level, const char *prefix, const char *text,
+                 const char *suffix)
 {
-    char line[1024];
-    int n = 0;
-    va_list ap;
+    if (level < 0 || level > INT_MAX / INDENT_WIDTH)
+        fail();
+    int spaces = level * INDENT_WIDTH;
 
-    for (int i = 0; i < level && n < 900; i++)
-        n += snprintf(line + n, sizeof line - n, "%s", INDENT);
+    /* Measure the full line, including indentation and newline. */
+    int n = snprintf(NULL, 0, "%*s%s%s%s\n", spaces, "", prefix, text, suffix);
+    if (n < 0 || (size_t)n > SIZE_MAX - out_len - 1)
+        fail();
 
-    va_start(ap, fmt);
-    vsnprintf(line + n, sizeof line - n, fmt, ap);
-    va_end(ap);
+    /* Reserve exactly enough room, including the null terminator. */
+    char *grown = realloc(out, out_len + (size_t)n + 1);
+    if (grown == NULL)
+        fail();
+    out = grown;
 
-    size_t len = strlen(line);
-    if (out_len + len + 2 > out_cap) {
-        size_t new_cap = out_cap ? out_cap * 2 : 4096;
-        while (new_cap < out_len + len + 2)
-            new_cap *= 2;
-        char *grown = realloc(out, new_cap);
-        if (grown == NULL)
-            fail();
-        out = grown;
-        out_cap = new_cap;
-    }
-    memcpy(out + out_len, line, len);
-    out_len += len;
-    out[out_len++] = '\n';
-    out[out_len] = '\0';
+    int written = snprintf(out + out_len, (size_t)n + 1,
+                           "%*s%s%s%s\n", spaces, "", prefix, text, suffix);
+    if (written != n)
+        fail();
+    out_len += (size_t)n;
 }
 
 static void open_nt(const char *name)
 {
-    emit(depth, "<%s>", name);
+    emit(depth, "<", name, ">");
     depth++;
 }
 
 static void close_nt(const char *name)
 {
     depth--;
-    emit(depth, "</%s>", name);
+    emit(depth, "</", name, ">");
 }
 
 /* ------------------------------------------------------------------------ */
@@ -373,9 +371,9 @@ static void match(TokenType expected)
 {
     if (lookahead != expected)
         fail();                    /* syntax error */
-    emit(depth, "<%s>", token_name(lookahead));
-    emit(depth + 1, "%s", lookahead_value);
-    emit(depth, "</%s>", token_name(lookahead));
+    emit(depth, "<", token_name(lookahead), ">");
+    emit(depth + 1, "", lookahead_value, "");
+    emit(depth, "</", token_name(lookahead), ">");
     next_token();
 }
 
